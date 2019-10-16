@@ -3,96 +3,89 @@
 # We do not want users to end up with a partially working install, so we exit the script
 # instead of continuing the installation with something broken
 set -e
-
-echo installing webmin dhcp pihole and dns
-echo you have 5 seconds to proceed ...
-echo or
-echo hit Ctrl+C to quit
-echo -e "\n"
-sleep 6
-
-apt-get install dialog -y
-
-
-HEIGHT=15
-WIDTH=40
-CHOICE_HEIGHT=4
-BACKTITLE="Router Install"
-TITLE="DNS?"
-MENU="Do you want to install your own dns or use example google:"
-
-OPTIONS=(1 "Yes"
-         2 "No")
-
-owndns=$(dialog --clear \
-                --backtitle "$BACKTITLE" \
-                --title "$TITLE" \
-                --menu "$MENU" \
-                $HEIGHT $WIDTH $CHOICE_HEIGHT \
-                "${OPTIONS[@]}" \
-                2>&1 >/dev/tty)
-
-clear
-case $owndns in
-        1)
-            echo "You chose yes"
-            ;;
-        2)
-            echo "You chose no"
-            ;;
-esac
-
-
- echo "Please, select a network interface for the internet:"
-cd /sys/class/net && select foo2 in *; do echo $foo2 selected; break
- done
-echo "Please, select a network interface for the DHCP:"
-cd /sys/class/net && select foo in *; do echo $foo selected; break
- done
-
-
-
-while read -r p ; do apt-get install -y $p ; done < <(cat << "EOF"
-    perl
-    libnet-ssleay-perl
-    openssl
-	libauthen-pam-perl
-    libpam-runtime
-    libio-pty-perl
-    apt-show-versions
-    python
-    shared-mime-info
-    unzip
-	libisccc-export140
-	libisccfg-export140
-	libirs-export141
-	selinux-utils
-	policycoreutils
-	isc-dhcp-server
-EOF
-)
+whiptail --title "Welcome" --msgbox "This will make a debian pc to a router. Please use a fresh install." 10 60
+#########################################Update########################################################
+# Run apt-get update, saves time. Instead of for every install running apt-get update
+    {
+    i=1
+    while read -r line; do
+        i=$(( $i + 1 ))
+        echo $i
+    done < <(apt-get update)
+    } | whiptail --title "Progress" --gauge "Please wait while updating repo's" 6 60 0
+#########################################dialog########################################################
+# Run apt-get install, Installing dialog
+    {
+    i=1
+    while read -r line; do
+        i=$(( $i + 1 ))
+        echo $i
+    done < <(apt-get install dialog -y)
+    } | whiptail --title "Progress" --gauge "Please wait while installing dialog" 6 60 0
+#########################################DNS########################################################
+if (whiptail --title "DNS" --yesno "Do you want to install your own dns or use example google:" 10 60) then
+    echo "You chose Yes. Exit status was $?."
+else
+    echo "You chose No. Exit status was $?."
+fi
+#########################################interface internet########################################################
+DISPLAY=()
+INTERFACES=$(ip l | grep -E '[a-z].*: ' | cut -d ':' -f2 | cut -d ' ' -f2) #Interfaces are isolated in a variable $ INTERFACES
+set $INTERFACES #Each interface isolated by the variable $ INTERFACES is written in an argument
+for i in $@ #We look for the variable $ i representing an interface in the list of arguments
+do
+        IP=$(ip a | grep -E "$i$" | cut -d ' ' -f6) #IP is isolated from the interface on which loop
+        DISPLAY+=("$i" "$IP") #In this case, we display the interface and its IP layouts for Whiptail, with a \ at the end of the line
+done
+IFACE=$(whiptail --title "internet interface" --menu "Please, select a network interface for the internet:" 15 60 4 \
+        "${DISPLAY[@]}" 3>&1 1>&2 2>&3)
+exitstatus=$?
+if [ $exitstatus = 0 ]; then
+    echo  $IFACE
+else
+    echo "you canceled"
+fi
+#########################################interface dhcp########################################################
+IFACE2=$(whiptail --title "internet interface" --menu "Please, select a network interface for the DHCP:" 15 60 4 \
+        "${DISPLAY[@]}" 3>&1 1>&2 2>&3)
+exitstatus=$?
+if [ $exitstatus = 0 ]; then
+    echo  $IFACE2
+else
+    echo "you canceled"
+fi
+#########################################install########################################################
+# Run apt-get install, Installing a lot off things.
+    {
+    i=1
+    while read -r line; do
+        i=$(( $i + 1 ))
+        echo $i
+    done < <(apt-get install perl libnet-ssleay-perl openssl libauthen-pam-perl libpam-runtime libio-pty-perl apt-show-versions python shared-mime-info unzip libisccc-export140 libisccfg-export140 libirs-export141 selinux-utils policycoreutils isc-dhcp-server -y)
+    } | whiptail --title "Progress" --gauge "Please wait while installing dialog" 6 60 0
+#########################################Webmin########################################################
+# Installing Webmin.
 echo installing Webmin
 cd ~;
 wget http://prdownloads.sourceforge.net/webadmin/webmin_1.930_all.deb
 dpkg --install webmin_1.930_all.deb
-
+#########################################NAT########################################################
 #enable packet forwarding, otherwise NAT will not work
 cp /etc/sysctl.conf /etc/sysctl.conf.bak 
 sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
- 
+#########################################static ip########################################################
 #imput static ip to interface
 cp /etc/network/interfaces /etc/network/interfaces.bak
-
-echo ' '
+echo ' ' >> /etc/network/interfaces
 echo '# The network interface for dhcp' >> /etc/network/interfaces
-echo 'auto '$foo'' >> /etc/network/interfaces
-echo 'iface '$foo' inet static' >> /etc/network/interfaces
+echo 'auto '$IFACE'' >> /etc/network/interfaces
+echo 'iface '$IFACE' inet static' >> /etc/network/interfaces
 echo '      address 192.168.123.1' >> /etc/network/interfaces
 echo '      netmask 255.255.255.0' >> /etc/network/interfaces
 echo '      broadcast 192.168.123.255' >> /etc/network/interfaces
-sleep 6
-
-ifup $foo
+sleep 10
+ifup $IFACE
+#########################################DHCP########################################################
 #setting DHCP server up
 echo '# Local network on eth_SAFE
 subnet 192.168.123.0 netmask 255.255.255.0 {
@@ -102,15 +95,13 @@ subnet 192.168.123.0 netmask 255.255.255.0 {
         option routers 192.168.123.1;
         range 192.168.123.10 192.168.123.200;
         }' >> /etc/dhcp/dhcpd.conf
-
-sed -i '/INTERFACESv4=""/c\INTERFACESv4="'$foo'"' /etc/default/isc-dhcp-server
-echo 'INTERFACES='$foo'' >> /etc/default/isc-dhcp-server
-		
+sed -i '/INTERFACESv4=""/c\INTERFACESv4="'$IFACE'"' /etc/default/isc-dhcp-server
+echo 'INTERFACES='$IFACE'' >> /etc/default/isc-dhcp-server
+sleep 10
 systemctl start isc-dhcp-server
-
+#########################################Firewall########################################################
 #setup firewall
 file="/etc/iptables.up.rules"
-
 if [ -f $file ] ; then
     rm $file
 fi
@@ -120,7 +111,7 @@ echo '# Generated by iptables-save v1.6.0 on Mon Sep 23 22:50:07 2019
 :INPUT ACCEPT [34:2602]
 :OUTPUT ACCEPT [0:0]
 :POSTROUTING ACCEPT [0:0]
--A POSTROUTING -o foo2 -j MASQUERADE
+-A POSTROUTING -o $IFACE2 -j MASQUERADE
 COMMIT
 # Completed on Mon Sep 23 22:50:07 2019
 # Generated by iptables-save v1.6.0 on Mon Sep 23 22:50:07 2019
@@ -139,29 +130,27 @@ COMMIT
 :OUTPUT ACCEPT [0:0]
 -A INPUT -p icmp -j ACCEPT
 -A INPUT -i lo -j ACCEPT
--A INPUT -i $foo -j ACCEPT
--A INPUT -m conntrack -i foo2 --ctstate ESTABLISHED,RELATED -j ACCEPT
--A FORWARD -i $foo -o foo2 -j ACCEPT
--A FORWARD -m conntrack -i foo2 -o $foo --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -i $IFACE -j ACCEPT
+-A INPUT -m conntrack -i $IFACE2 --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A FORWARD -i $IFACE -o $IFACE2 -j ACCEPT
+-A FORWARD -m conntrack -i $IFACE2 -o $IFACE --ctstate ESTABLISHED,RELATED -j ACCEPT
 COMMIT' > /etc/iptables.up.rules
-
-
-if [[ $owndns = "1" ]]
+#########################################DNS########################################################
+#setup Dns
+if [[ $owndns = "0" ]]
 then
-    apt-get update  # To get the latest package lists
 	apt-get install unbound -y
 	wget -O root.hints https://www.internic.net/domain/named.root
 	mv root.hints /var/lib/unbound/
-	
 	file2="/etc/unbound/unbound.conf.d/pi-hole.conf"
 fi
-if [[ $owndns = "1" ]]
+if [[ $owndns = "0" ]]
 then
 if [ -f $file2 ] ; then
     rm $file2
 fi
 fi
-if [[ $owndns = "1" ]]
+if [[ $owndns = "0" ]]
 then
 echo 'server:
     # If no logfile is specified, syslog is used
@@ -211,15 +200,12 @@ echo 'server:
     private-address: fd00::/8
     private-address: fe80::/10' > /etc/unbound/unbound.conf.d/pi-hole.conf
 fi
-if [[ $owndns = "1" ]]
+if [[ $owndns = "0" ]]
 then
-sleep 6
+sleep 10
 service unbound start
 fi
-
-
-
-
+#########################################Pihole########################################################
 #pihole script from https://github.com/pi-hole/pi-hole/blob/master/automated%20install/basic-install.sh
 
 #!/usr/bin/env bash
@@ -2900,11 +2886,7 @@ main() {
 if [[ "${PH_TEST}" != true ]] ; then
     main "$@"
 fi
-
-
-#install own dns
-
-
+#########################################reboot########################################################
 echo we need to reboot to get it working
 echo you have 5 seconds to proceed ...
 echo or
