@@ -46,7 +46,7 @@ else
     echo "you canceled"
 fi
 #########################################interface dhcp########################################################
-IFACE2=$(whiptail --title "internet interface" --menu "Please, select a network interface for the DHCP:" 15 60 4 \
+IFACE2=$(whiptail --title "DHCP interface" --menu "Please, select a network interface for the DHCP:" 15 60 4 \
         "${DISPLAY[@]}" 3>&1 1>&2 2>&3)
 exitstatus=$?
 if [ $exitstatus = 0 ]; then
@@ -65,10 +65,19 @@ fi
     } | whiptail --title "Progress" --gauge "Please wait while installing dialog" 6 60 0
 #########################################Webmin########################################################
 # Installing Webmin.
-echo installing Webmin
-cd ~;
-wget http://prdownloads.sourceforge.net/webadmin/webmin_1.930_all.deb
-dpkg --install webmin_1.930_all.deb
+cd ~
+URL="http://prdownloads.sourceforge.net/webadmin/webmin_1.930_all.deb"
+wget "$URL" 2>&1 | \
+ stdbuf -o0 awk '/[.] +[0-9][0-9]?[0-9]?%/ { print substr($0,63,3) }' | \
+ whiptail --title "Progress" --gauge "Downloading webmin" 6 60 0
+
+{
+    for ((i = 0 ; i <= 100 ; i+=20)); do
+        dpkg --install webmin_1.930_all.deb
+    done
+} | whiptail --gauge "Please wait while installing webmin" 6 60 0
+
+
 #########################################NAT########################################################
 #enable packet forwarding, otherwise NAT will not work
 cp /etc/sysctl.conf /etc/sysctl.conf.bak 
@@ -78,13 +87,13 @@ sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
 cp /etc/network/interfaces /etc/network/interfaces.bak
 echo ' ' >> /etc/network/interfaces
 echo '# The network interface for dhcp' >> /etc/network/interfaces
-echo 'auto '$IFACE'' >> /etc/network/interfaces
-echo 'iface '$IFACE' inet static' >> /etc/network/interfaces
+echo 'auto '$IFACE2'' >> /etc/network/interfaces
+echo 'iface '$IFACE2' inet static' >> /etc/network/interfaces
 echo '      address 192.168.123.1' >> /etc/network/interfaces
 echo '      netmask 255.255.255.0' >> /etc/network/interfaces
 echo '      broadcast 192.168.123.255' >> /etc/network/interfaces
 sleep 10
-ifup $IFACE
+ifup $IFACE2
 #########################################DHCP########################################################
 #setting DHCP server up
 echo '# Local network on eth_SAFE
@@ -95,8 +104,8 @@ subnet 192.168.123.0 netmask 255.255.255.0 {
         option routers 192.168.123.1;
         range 192.168.123.10 192.168.123.200;
         }' >> /etc/dhcp/dhcpd.conf
-sed -i '/INTERFACESv4=""/c\INTERFACESv4="'$IFACE'"' /etc/default/isc-dhcp-server
-echo 'INTERFACES='$IFACE'' >> /etc/default/isc-dhcp-server
+sed -i '/INTERFACESv4=""/c\INTERFACESv4="'$IFACE2'"' /etc/default/isc-dhcp-server
+echo 'INTERFACES='$IFACE2'' >> /etc/default/isc-dhcp-server
 sleep 10
 systemctl start isc-dhcp-server
 #########################################Firewall########################################################
